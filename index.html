@@ -44,6 +44,7 @@ button{font:inherit;cursor:pointer;touch-action:manipulation}
 .best{text-align:center;font-size:.8rem;opacity:.75;height:16px}
 .act{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:6px}
 #home2.hide{display:inline-block!important;visibility:hidden}
+@media (max-width:700px){.back::after{width:24%;border-width:1px;box-shadow:0 0 0 2px #2a0a16,0 0 0 3px rgba(212,175,55,.7)}.back::before{width:6%}}
 </style>
 </head>
 <body>
@@ -83,7 +84,7 @@ function fit(){
  for(let c=2;c<=N/2;c++){if(N%c)continue;const r=N/c;
   const w=Math.min((W-gap*(c-1))/c,((H-gap*(r-1))/r)*3/4,190);
   if(w>bw){bw=w;bc=c}}
- const bd=$('board');bd.style.gap=gap+'px';bd.style.gridTemplateColumns='repeat('+bc+','+Math.max(24,Math.floor(bw*0.8))+'px)';
+ const bd=$('board');bd.style.gap=gap+'px';bd.style.gridTemplateColumns='repeat('+bc+','+Math.max(24,Math.floor(bw*(W<700?1:0.8)))+'px)';
 }
 function start(){
  clearInterval(timer);sec=0;started=false;sel=[];lock=false;moves=0;found=0;
