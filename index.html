@@ -32,7 +32,7 @@ button{font:inherit;cursor:pointer;touch-action:manipulation}
 #wrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
 #board{display:grid;justify-content:center}
 .card{aspect-ratio:3/4;width:100%;perspective:700px;border:0;padding:0;background:none}
-.in{position:relative;width:100%;height:100%;transition:transform .45s;transform-style:preserve-3d;will-change:transform}
+.in{position:relative;width:100%;height:100%;transition:transform .3s;transform-style:preserve-3d;will-change:transform}
 .card.flip .in,.card.done .in{transform:rotateY(180deg)}
 .f,.b{position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;border-radius:8px;overflow:hidden}
 .f{transform:rotateY(180deg);background:var(--card);border:1px solid var(--line)}
@@ -168,7 +168,8 @@ function win(){
 $('restart').onclick=()=>{if(mpOn)mpRematch();else start()};$('home2').onclick=()=>$('home').onclick();
 
 /* ===== multiplayer ===== */
-let DB=null,UID='',mpOn=false,code='',R=null,P=[],uR=null,uP=null,boardKey='',resSeq=-1;
+let DB=null,UID='',mpOn=false,code='',R=null,P=[],uR=null,uP=null,boardKey='',resSeq=-1,tKey='',tStart=0,passedKey='',mpBase='';
+const TURN_SEC=30;
 const COLORS=['#e5484d','#3e8ee6','#2fa66a','#e0a21a','#9a5fd6'];
 function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
 function esc(t){return String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
@@ -185,21 +186,52 @@ async function pickFB(){
 }
 function rid(){return ls('cm-uid')||(()=>{const v='g'+Math.random().toString(36).slice(2,10);ls('cm-uid',v);return v})()}
 function makeFB(base){
- base=base.replace(/\/+$/,'');const L=new Set();
- const url=p=>base+'/'+p+'.json';
- const js=async(p,m,b)=>{const o={method:m||'GET'};if(b!==undefined){o.headers={'Content-Type':'application/json'};o.body=JSON.stringify(b)}const r=await fetch(url(p),o);if(!r.ok)throw new Error('fb '+r.status);return r.json()};
- const kick=()=>L.forEach(l=>l.pull());
- const wr=async(p,m,b)=>{const v=await js(p,m,b);kick();return v};
+ base=base.replace(/\/+$/,'');const W=new Set();
+ const url=(p,q)=>base+'/'+p+'.json'+(q||'');
+ const gone=v=>v===null||v===undefined||(Array.isArray(v)&&!v.length)||(typeof v==='object'&&!Array.isArray(v)&&!Object.keys(v).length);
+ const toObj=v=>Array.isArray(v)?Object.fromEntries(v.map((x,i)=>[i,toObj(x)]).filter(([,x])=>!gone(x))):(v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,toObj(x)]).filter(([,x])=>!gone(x))):v);
+ const arr=v=>{if(v&&typeof v==='object'){const ks=Object.keys(v);if(ks.length&&ks.every((k,i)=>String(i)===k))return ks.map(k=>arr(v[k]));const o={};ks.forEach(k=>{o[k]=arr(v[k])});return o}return v};
+ const setIn=(root,keys,val)=>{let n=root;for(let i=0;i<keys.length-1;i++){if(!n[keys[i]]||typeof n[keys[i]]!=='object')n[keys[i]]={};n=n[keys[i]]}const k=keys[keys.length-1];if(gone(val))delete n[k];else n[k]=val};
+ const segs=p=>p.split('/').filter(Boolean);
+ const pre=(a,c)=>a.length<=c.length&&a.every((x,i)=>x===c[i]);
+ const send=async(p,m,b)=>{const o={method:m};if(b!==undefined){o.headers={'Content-Type':'application/json'};o.body=JSON.stringify(b)}const r=await fetch(url(p,'?print=silent'),o);if(!r.ok)throw new Error('fb '+r.status)};
+ const js=async p=>{const r=await fetch(url(p));if(!r.ok)throw new Error('fb '+r.status);return r.json()};
+ const wr=(p,m,b)=>{W.forEach(w=>w.local(p,m,b));return send(p,m,b)};
  const snap=(p,v)=>{const ok=v!==null&&v!==undefined;const d=ok&&typeof v==='object'?{...v}:v;if(ok&&p.split('/').length===2)delete d.players;return{exists:ok,id:p.split('/').pop(),data:()=>d}};
  const qsnap=v=>({docs:Object.keys(v||{}).map(k=>({id:k,data:()=>v[k]}))});
  const watch=(p,mk,cb)=>{
-  let es=null,tm=null,dead=false,n=0,last=0;
-  const pull=async()=>{const my=++n;try{const v=await js(p);if(dead||my<last)return;last=my;cb(mk(v))}catch(e){}};
-  const l={pull};L.add(l);
-  const sched=()=>{clearTimeout(tm);tm=setTimeout(pull,40)};
-  try{es=new EventSource(url(p));es.addEventListener('put',sched);es.addEventListener('patch',sched)}catch(e){}
-  const poll=setInterval(pull,2500);pull();
-  return()=>{dead=true;L.delete(l);clearInterval(poll);clearTimeout(tm);if(es)es.close()};
+  const me=segs(p);let raw=null,ok=false,dead=false,last=Date.now(),es=null;
+  const emit=()=>{if(!dead)cb(mk(raw===null?null:arr(raw)))};
+  const fin=()=>{if(raw&&!Object.keys(raw).length)raw=null};
+  const w={
+   local(wp,m,b){
+    const s=segs(wp);
+    if(s.length===me.length&&pre(s,me)){
+     if(m==='PUT')raw=gone(b)?null:toObj(b);
+     else if(m==='PATCH'){raw=raw||{};for(const k in b){const v=toObj(b[k]);if(gone(v))delete raw[k];else raw[k]=v}}
+     else raw=null;
+    }else if(pre(me,s)){
+     raw=raw||{};const rel=s.slice(me.length);
+     if(m==='PUT')setIn(raw,rel,toObj(b));
+     else if(m==='PATCH'){for(const k in b)setIn(raw,[...rel,k],toObj(b[k]))}
+     else setIn(raw,rel,null);
+    }else if(pre(s,me)&&m==='DELETE')raw=null;
+    else return;
+    fin();emit();
+   },
+   async pull(){try{const v=await js(p);if(dead)return;raw=gone(v)?null:toObj(v);emit()}catch(e){}}
+  };
+  const onEv=e=>{
+   last=Date.now();let m;try{m=JSON.parse(e.data)}catch(x){return}
+   if(!m)return;const s=segs(m.path||'/');
+   if(e.type==='put'){if(s.length===0)raw=gone(m.data)?null:toObj(m.data);else{raw=raw||{};setIn(raw,s,toObj(m.data))}}
+   else{raw=raw||{};for(const k in m.data)setIn(raw,[...s,k],toObj(m.data[k]))}
+   fin();emit();
+  };
+  try{es=new EventSource(url(p));es.addEventListener('put',onEv);es.addEventListener('patch',onEv);es.addEventListener('keep-alive',()=>{last=Date.now()});es.onopen=()=>{ok=true};es.onerror=()=>{ok=false}}catch(e){}
+  const poll=setInterval(()=>{if(!ok||Date.now()-last>40000)w.pull()},1500);
+  W.add(w);w.pull();
+  return()=>{dead=true;W.delete(w);clearInterval(poll);if(es)es.close()};
  };
  return{fb:true,
   doc:p=>({get:async()=>snap(p,await js(p)),set:d=>wr(p,'PUT',d),update:d=>wr(p,'PATCH',d),delete:()=>wr(p,'DELETE'),onSnapshot:cb=>watch(p,v=>snap(p,v),cb)}),
@@ -295,14 +327,14 @@ function renderGame(){
  const cur=curId(),sc=R.scores||{},play=R.status==='play';
  $('score').innerHTML=R.order.map((id,i)=>'<span class="chip'+(play&&id===cur?' turn':'')+'" style="--c:'+COLORS[i%5]+'">'+esc(nameOf(id))+(id===UID?'(나)':'')+' '+(sc[id]||0)+'</span>').join('');
  $('best').textContent='';
- if(play){$('msg').textContent=cur===UID?'내 차례예요! 카드를 두 장 뒤집어 보세요.':nameOf(cur)+'님의 차례예요.'}
- else{const mx=Math.max(...R.order.map(id=>sc[id]||0)),w=R.order.filter(id=>(sc[id]||0)===mx).map(nameOf);$('msg').textContent='🎉 '+w.join(', ')+(w.length>1?' 공동 우승!':' 우승!')+' ('+mx+'쌍)'}
+ if(play){mpBase=cur===UID?'내 차례예요! 카드를 두 장 뒤집어 보세요.':nameOf(cur)+'님의 차례예요.';const k=R.turn+'|'+(R.streak||0);if(tKey!==k){tKey=k;tStart=Date.now();passedKey=''}$('tbar').classList.remove('hide');mpTick()}
+ else{tKey='';$('tbar').classList.add('hide');const mx=Math.max(...R.order.map(id=>sc[id]||0)),w=R.order.filter(id=>(sc[id]||0)===mx).map(nameOf);$('msg').textContent='🎉 '+w.join(', ')+(w.length>1?' 공동 우승!':' 우승!')+' ('+mx+'쌍)'}
  $('skip').style.visibility=(isHost()&&play)?'visible':'hidden';
  $('restart').disabled=!(isHost()&&!play);
  fit();
  if(play&&fl.length===2&&resSeq!==R.seq){
   resSeq=R.seq;const s=R.seq;
-  if(cur===UID)setTimeout(()=>mpResolve(s),R.deck[fl[0]]===R.deck[fl[1]]?250:1100);else if(isHost())setTimeout(()=>mpResolve(s),4000);
+  if(cur===UID)setTimeout(()=>mpResolve(s),R.deck[fl[0]]===R.deck[fl[1]]?100:850);else if(isHost())setTimeout(()=>mpResolve(s),4000);
  }
 }
 async function mpPick(i){
@@ -323,6 +355,19 @@ async function mpRematch(){
  if(!isHost()||!R||R.status!=='end'){toast('방장만 다시 시작할 수 있어요.');return}
  try{await DB.doc('rooms/'+code).update({status:'lobby',deck:[],matched:[],flipped:[],scores:{},turn:0,streak:0,seq:(R.seq||0)+1})}catch(e){}
 }
+function mpTick(){
+ if(!mpOn||!R||R.status!=='play'||!tStart)return;
+ const el=(Date.now()-tStart)/1000,left=Math.max(0,Math.ceil(TURN_SEC-el)),cur=curId(),fl=R.flipped||[];
+ $('msg').textContent=mpBase+' · '+left+'초';
+ const bi=$('tbar').firstChild;bi.style.transition='width .5s linear';bi.style.width=(left/TURN_SEC*100)+'%';$('tbar').classList.toggle('low',left<=5);
+ if(fl.length===2||passedKey===tKey)return;
+ if((cur===UID&&el>=TURN_SEC)||(cur!==UID&&isHost()&&el>=TURN_SEC+4)){passedKey=tKey;mpPass(cur===UID)}
+}
+async function mpPass(mine){
+ if(!R||R.status!=='play')return;
+ try{await DB.doc('rooms/'+code).update({flipped:[],turn:(R.turn+1)%R.order.length,streak:0,seq:(R.seq||0)+1});if(mine)toast('시간 초과! 다음 사람 차례예요.')}catch(e){}
+}
+setInterval(mpTick,500);
 $('skip').onclick=async()=>{
  if(!isHost()||!R||R.status!=='play')return;
  try{await DB.doc('rooms/'+code).update({flipped:[],turn:(R.turn+1)%R.order.length,streak:0,seq:(R.seq||0)+1})}catch(e){}
