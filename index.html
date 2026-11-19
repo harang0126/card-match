@@ -83,7 +83,7 @@ button{font:inherit;cursor:pointer;touch-action:manipulation}
 <div class="cols"><div class="col"><div class="lbl">혼자 하기</div><div class="lv" id="levels"></div></div><div class="col"><div class="lbl">서바이벌</div><div class="lv" id="svLevels"></div></div></div><div id="mpBox" class="hide"><div class="lbl">여럿이 하기</div><div class="lv"><button id="mpBtn">함께 하기</button></div></div>
 </section>
 <section id="mpEntry" class="scr hide">
-<h1>함께 하기</h1><p>2~5명이 한 턴씩 번갈아 진행해요.</p>
+<h1>함께 하기</h1><p>2~8명이 한 턴씩 번갈아 진행해요.</p>
 <input id="nick" maxlength="8" placeholder="닉네임" autocomplete="off">
 <button class="pri" id="mkRoom">방 만들기</button>
 <div class="lbl">또는 방 코드로 참가</div>
@@ -95,7 +95,7 @@ button{font:inherit;cursor:pointer;touch-action:manipulation}
 <section id="lobby" class="scr hide">
 <div class="lbl">방 코드 (친구에게 알려 주세요)</div><div class="code" id="lcode"></div>
 <div class="pl" id="plist"></div>
-<div class="lbl">난이도</div><div class="lvrow" id="lvrow"></div>
+<div class="lbl">최대 인원</div><div class="lvrow" id="mxrow"></div><div class="lbl">난이도</div><div class="lvrow" id="lvrow"></div>
 <button class="pri" id="startBtn">시작하기</button>
 <div class="lbl" id="lwait"></div>
 <button class="sec" id="lLeave">나가기</button>
@@ -170,13 +170,13 @@ $('restart').onclick=()=>{if(mpOn)mpRematch();else start()};$('home2').onclick=(
 /* ===== multiplayer ===== */
 let DB=null,UID='',mpOn=false,code='',R=null,P=[],uR=null,uP=null,boardKey='',resSeq=-1,tKey='',tStart=0,passedKey='',mpBase='';
 const TURN_SEC=30;
-const COLORS=['#e5484d','#3e8ee6','#2fa66a','#e0a21a','#9a5fd6'];
+const COLORS=['#e5484d','#3e8ee6','#2fa66a','#e0a21a','#9a5fd6','#e0709d','#1ba8a0','#8a6a4a'];
 function ls(k,v){try{if(v===undefined)return localStorage.getItem(k);localStorage.setItem(k,v)}catch(e){return null}}
 function esc(t){return String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 function go(id){['title','game','mpEntry','lobby'].forEach(x=>$(x).classList.toggle('hide',x!==id));window.scrollTo(0,0)}
 function toast(t){const e=$('toast');e.textContent=t;e.style.opacity=1;setTimeout(()=>{e.style.opacity=0},2600)}
 function err(t){$('mpErr').textContent=t||''}
-function setMode(m){$('score').classList.toggle('hide',!m);document.querySelector('.stats').classList.toggle('hide',m);$('restart').textContent=m?'다시 하기':'다시 섞기';$('home').textContent=m?'← 나가기':'← 처음으로';$('skip').style.visibility='hidden';if(m)$('tbar').classList.add('hide');if(!m){$('restart').disabled=false}}
+function setMode(m){$('score').classList.toggle('hide',!m);document.querySelector('.stats').classList.toggle('hide',m);$('restart').textContent=m?'다시 하기':'다시 섞기';$('home2').textContent=m?'나가기':'처음으로';$('home').style.visibility='';$('home').textContent=m?'← 나가기':'← 처음으로';$('skip').style.visibility='hidden';if(m)$('tbar').classList.add('hide');if(!m){$('restart').disabled=false}}
 function isHost(){return !!R&&R.host===UID}
 function nameOf(id){const p=P.find(x=>x.id===id);return p?p.name:'(나감)'}
 function curId(){return R.order[R.turn%R.order.length]}
@@ -184,7 +184,7 @@ const FIREBASE_URLS=['https://card-match-54d13-default-rtdb.asia-southeast1.fire
 async function pickFB(){
  try{return await Promise.any(FIREBASE_URLS.map(async u=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),6000);try{const r=await fetch(u+'/rooms.json?shallow=true',{signal:c.signal});if(!r.ok)throw 0;return u}finally{clearTimeout(t)}}))}catch(e){return null}
 }
-function rid(){return ls('cm-uid')||(()=>{const v='g'+Math.random().toString(36).slice(2,10);ls('cm-uid',v);return v})()}
+function rid(){try{let v=sessionStorage.getItem('cm-uid');if(!v){v='g'+Math.random().toString(36).slice(2,10);sessionStorage.setItem('cm-uid',v)}return v}catch(e){return 'g'+Math.random().toString(36).slice(2,10)}}
 function makeFB(base){
  base=base.replace(/\/+$/,'');const W=new Set();
  const url=(p,q)=>base+'/'+p+'.json'+(q||'');
@@ -233,7 +233,7 @@ function makeFB(base){
   W.add(w);w.pull();
   return()=>{dead=true;W.delete(w);clearInterval(poll);if(es)es.close()};
  };
- return{fb:true,
+ return{fb:true,base,
   doc:p=>({get:async()=>snap(p,await js(p)),set:d=>wr(p,'PUT',d),update:d=>wr(p,'PATCH',d),delete:()=>wr(p,'DELETE'),onSnapshot:cb=>watch(p,v=>snap(p,v),cb)}),
   collection:p=>({get:async()=>qsnap(await js(p)),onSnapshot:cb=>watch(p,qsnap,cb)})};
 }
@@ -256,7 +256,7 @@ $('mkRoom').onclick=async()=>{
  try{
   const A='ABCDEFGHJKMNPQRSTUVWXYZ23456789';let c,t=0;
   do{c='';for(let i=0;i<4;i++)c+=A[Math.floor(Math.random()*A.length)];t++}while((await DB.doc('rooms/'+c).get()).exists&&t<8);
-  await DB.doc('rooms/'+c).set({host:UID,status:'lobby',lv:0,deck:[],matched:[],flipped:[],order:[],scores:{},turn:0,seq:0,created:Date.now()});
+  await DB.doc('rooms/'+c).set({host:UID,status:'lobby',lv:0,max:4,deck:[],matched:[],flipped:[],order:[],scores:{},turn:0,seq:0,created:Date.now()});
   await DB.doc('rooms/'+c+'/players/'+UID).set({name:nm,joined:Date.now()});
   enter(c);
  }catch(e){err(DB.fb?'서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.':'방을 만들 수 없어요. 이 링크에 편집·참여 권한이 있는지 확인해 주세요.')}
@@ -267,7 +267,7 @@ $('joinRoom').onclick=async()=>{
  try{
   const s=await DB.doc('rooms/'+c).get();if(!s.exists){err('방을 찾을 수 없어요.');return}
   const ps=(await DB.collection('rooms/'+c+'/players').get()).docs,mine=ps.find(d=>d.id===UID);
-  if(!mine){if(s.data().status!=='lobby'){err('이미 시작된 방이에요.');return}if(ps.length>=5){err('방이 가득 찼어요. (최대 5명)');return}}
+  if(!mine){if(s.data().status!=='lobby'){err('이미 시작된 방이에요.');return}const mx=s.data().max||5;if(ps.length>=mx){err('방이 가득 찼어요. (최대 '+mx+'명)');return}}
   await DB.doc('rooms/'+c+'/players/'+UID).set({name:nm,joined:mine?mine.data().joined:Date.now()});
   enter(c);
  }catch(e){err(DB.fb?'서버에 연결할 수 없어요. 잠시 후 다시 시도해 주세요.':'참가할 수 없어요. 이 링크에 참여 권한이 있는지 확인해 주세요.')}
@@ -290,6 +290,7 @@ async function mpLeave(){
 $('lLeave').onclick=()=>mpLeave();
 function mpRender(){
  if(!mpOn||!R)return;
+ if(P.length&&!P.some(p=>p.id===R.host)&&P[0].id===UID){DB.doc('rooms/'+code).update({host:UID}).catch(()=>{})}
  if(R.status==='lobby'){
   if($('lobby').classList.contains('hide')){boardKey='';go('lobby')}
   renderLobby();
@@ -300,17 +301,23 @@ function mpRender(){
 }
 function renderLobby(){
  $('lcode').textContent=code;
- $('plist').innerHTML=P.map((p,i)=>'<div style="border-left:6px solid '+COLORS[i%5]+'">'+esc(p.name)+(p.id===R.host?' 👑':'')+(p.id===UID?' (나)':'')+'</div>').join('');
- const h=isHost();$('lvrow').innerHTML='';
+ $('plist').innerHTML=P.map((p,i)=>'<div style="border-left:6px solid '+COLORS[i%8]+'">'+esc(p.name)+(p.id===R.host?' 👑':'')+(p.id===UID?' (나)':'')+'</div>').join('');
+ const h=isHost(),mxv=R.max||5;$('mxrow').innerHTML='';
+ for(let n=2;n<=8;n++){const b=document.createElement('button');b.textContent=n+'명';b.disabled=!h||n<P.length;if(n===mxv)b.className='on';b.onclick=()=>{if(isHost()&&n!==mxv&&n>=P.length)DB.doc('rooms/'+code).update({max:n}).catch(()=>{})};$('mxrow').appendChild(b)}
+ $('lvrow').innerHTML='';
  LEVELS.forEach((l,i)=>{const b=document.createElement('button');b.textContent=l.k;b.disabled=!h;if(i===R.lv)b.className='on';
   b.onclick=()=>{if(isHost()&&i!==R.lv)DB.doc('rooms/'+code).update({lv:i}).catch(()=>{})};$('lvrow').appendChild(b)});
  $('startBtn').classList.toggle('hide',!h);$('startBtn').disabled=P.length<2;
- $('lwait').textContent=h?(P.length<2?'2명 이상 모이면 시작할 수 있어요. ('+P.length+'/5)':'참가자 '+P.length+'/5'):'방장이 설정하고 시작할 때까지 기다려 주세요.';
+ $('lwait').textContent=h?(P.length<2?'2명 이상 모이면 시작할 수 있어요. ('+P.length+'/'+mxv+')':'참가자 '+P.length+'/'+mxv):'방장이 설정하고 시작할 때까지 기다려 주세요.';
 }
 $('startBtn').onclick=async()=>{
- if(!isHost()||P.length<2)return;
- const N=LEVELS[R.lv].cards,pool=shuffle([...Array(IMAGES.length).keys()]).slice(0,N/2);
- try{await DB.doc('rooms/'+code).update({status:'play',deck:shuffle([...pool,...pool]),matched:Array(N).fill(-1),flipped:[],order:shuffle(P.map(p=>p.id)),scores:{},turn:0,streak:0,seq:(R.seq||0)+1})}catch(e){toast('시작하지 못했어요.')}
+ if(!isHost())return;
+ try{
+  const ps=(await DB.collection('rooms/'+code+'/players').get()).docs.map(d=>({id:d.id,...d.data()})).sort((x,y)=>x.joined-y.joined);
+  if(ps.length<2){toast('2명 이상 모여야 시작할 수 있어요.');return}
+  const N=LEVELS[R.lv].cards,pool=shuffle([...Array(IMAGES.length).keys()]).slice(0,N/2);
+  await DB.doc('rooms/'+code).update({status:'play',deck:shuffle([...pool,...pool]),matched:Array(N).fill(-1),flipped:[],order:shuffle(ps.map(p=>p.id)),scores:{},turn:0,streak:0,seq:(R.seq||0)+1});
+ }catch(e){toast('시작하지 못했어요.')}
 };
 function renderGame(){
  lv=R.lv;const key=R.deck.join(',');
@@ -323,12 +330,12 @@ function renderGame(){
  const cards=$('board').children,fl=R.flipped||[];
  for(let i=0;i<cards.length;i++){const m=R.matched[i];
   cards[i].classList.toggle('done',m>=0);cards[i].classList.toggle('flip',m<0&&fl.includes(i));
-  if(m>=0)cards[i].style.setProperty('--ok',COLORS[m%5])}
+  if(m>=0)cards[i].style.setProperty('--ok',COLORS[m%8])}
  const cur=curId(),sc=R.scores||{},play=R.status==='play';
- $('score').innerHTML=R.order.map((id,i)=>'<span class="chip'+(play&&id===cur?' turn':'')+'" style="--c:'+COLORS[i%5]+'">'+esc(nameOf(id))+(id===UID?'(나)':'')+' '+(sc[id]||0)+'</span>').join('');
+ $('score').innerHTML=R.order.map((id,i)=>'<span class="chip'+(play&&id===cur?' turn':'')+'" style="--c:'+COLORS[i%8]+'">'+esc(nameOf(id))+(id===UID?'(나)':'')+' '+(sc[id]||0)+'</span>').join('');
  $('best').textContent='';
- if(play){mpBase=cur===UID?'내 차례예요! 카드를 두 장 뒤집어 보세요.':nameOf(cur)+'님의 차례예요.';const k=R.turn+'|'+(R.streak||0);if(tKey!==k){tKey=k;tStart=Date.now();passedKey=''}$('tbar').classList.remove('hide');mpTick()}
- else{tKey='';$('tbar').classList.add('hide');const mx=Math.max(...R.order.map(id=>sc[id]||0)),w=R.order.filter(id=>(sc[id]||0)===mx).map(nameOf);$('msg').textContent='🎉 '+w.join(', ')+(w.length>1?' 공동 우승!':' 우승!')+' ('+mx+'쌍)'}
+ if(play){$('home2').classList.add('hide');mpBase=cur===UID?'내 차례예요! 카드를 두 장 뒤집어 보세요.':nameOf(cur)+'님의 차례예요.';const k=R.turn+'|'+(R.streak||0);if(tKey!==k){tKey=k;tStart=Date.now();passedKey=''}$('tbar').classList.remove('hide');mpTick()}
+ else{tKey='';$('tbar').classList.add('hide');$('home2').classList.remove('hide');const mx=Math.max(...R.order.map(id=>sc[id]||0)),w=R.order.filter(id=>(sc[id]||0)===mx).map(nameOf);$('msg').textContent='🎉 '+w.join(', ')+(w.length>1?' 공동 우승!':' 우승!')+' ('+mx+'쌍)'+(isHost()?'':' · 방장이 다시 시작할 수 있어요')}
  $('skip').style.visibility=(isHost()&&play)?'visible':'hidden';
  $('restart').disabled=!(isHost()&&!play);
  fit();
@@ -368,6 +375,7 @@ async function mpPass(mine){
  try{await DB.doc('rooms/'+code).update({flipped:[],turn:(R.turn+1)%R.order.length,streak:0,seq:(R.seq||0)+1});if(mine)toast('시간 초과! 다음 사람 차례예요.')}catch(e){}
 }
 setInterval(mpTick,500);
+addEventListener('pagehide',()=>{if(mpOn&&DB&&DB.fb&&R&&R.status==='lobby'){try{fetch(DB.base+'/rooms/'+code+'/players/'+UID+'.json',{method:'DELETE',keepalive:true})}catch(e){}}});
 $('skip').onclick=async()=>{
  if(!isHost()||!R||R.status!=='play')return;
  try{await DB.doc('rooms/'+code).update({flipped:[],turn:(R.turn+1)%R.order.length,streak:0,seq:(R.seq||0)+1})}catch(e){}
